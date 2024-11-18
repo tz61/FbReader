@@ -26,7 +26,7 @@
 		output wire hdmi_clk_p,
 		output wire [2:0] hdmi_tx_n,
 		output wire [2:0] hdmi_tx_p,
-		input wire clk_2535m,//25.350354904968672, denoted as 26m in bd of main project
+		input wire clk_25m,//25m exactly for xc7s50-2csga324
 
 		// Ports of Axi Master Bus Interface M00_AXI
 		output wire  m00_axi_machine_idle,
@@ -91,13 +91,12 @@
         .G(green),
         .B(blue)
 	);
-	wire clk_25m, clk_125m, locked;
+	wire clk_125m, locked;
 	clk_wiz_0 main_clkgen (
-        .clk_25m(clk_25m),
         .clk_125m(clk_125m),
         .reset(~m00_axi_aresetn),//active high reset
         .locked(locked),
-        .clk_in1(clk_2535m)// 100M from clk local
+        .clk_in1(clk_25m)// 100M from clk local
     );
 	// User logic ends
 	vga_controller vgac(
