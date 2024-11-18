@@ -79,7 +79,6 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
     // accept the read data and response information.
     output logic M_AXI_RREADY,
     input logic [9:0] drawX,
-    input logic clk_100m,
     input logic v_blank,  // if blank then it is 1
     output logic [7:0] R,
     output logic [7:0] G,

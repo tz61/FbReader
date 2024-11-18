@@ -26,7 +26,7 @@
 		output wire hdmi_clk_p,
 		output wire [2:0] hdmi_tx_n,
 		output wire [2:0] hdmi_tx_p,
-		input wire clk_100m,
+		input wire clk_2535m,//25.350354904968672, denoted as 26m in bd of main project
 
 		// Ports of Axi Master Bus Interface M00_AXI
 		output wire  m00_axi_machine_idle,
@@ -86,7 +86,6 @@
 		.M_AXI_RVALID(m00_axi_rvalid),
 		.M_AXI_RREADY(m00_axi_rready),
     	.drawX(drawX),
-    	.clk_100m(clk_100m),
 		.v_blank(v_blank),
         .R(red),
         .G(green),
@@ -98,7 +97,7 @@
         .clk_125m(clk_125m),
         .reset(~m00_axi_aresetn),//active high reset
         .locked(locked),
-        .clk_in1(clk_100m)// 100M from clk local
+        .clk_in1(clk_2535m)// 100M from clk local
     );
 	// User logic ends
 	vga_controller vgac(
