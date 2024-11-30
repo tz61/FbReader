@@ -51,7 +51,7 @@ module vga_controller (
   //Disable Composite Sync
   assign sync = 1'b0;
   // When line hit hs=0, generate a pulse
-  assign init_read_line = (hc == 10'b1001111111)&&((vc == vlines)||(vc <= 10'b0111011110));//when it is 639(640th) and vc = former 1line,and leq 478, so vc == [-1,0-478],in total 480 lines
+  assign init_read_line = (hc == 10'd555)&&((vc == vlines)||(vc <= 10'b0111011110));//when it is 639(640th) and vc = former 1line,and leq 478, so vc == [-1,0-478],in total 480 lines
   assign v_blank = (vc >= 10'b0111100000);  // vc >= dec 480(481th line)
   //Runs the horizontal counter  when it resets vertical counter is incremented
   always_ff @(posedge pixel_clk or posedge reset) begin : counter_proc

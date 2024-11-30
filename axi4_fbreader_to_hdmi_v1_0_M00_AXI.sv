@@ -8,7 +8,8 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
     // Do not modify the parameters beyond this line
 
     // Base address of targeted slave
-    parameter C_M_TARGET_SLAVE_BASE_ADDR = 32'h81000000,
+    parameter FB0_ADDR = 32'h81000000,
+    parameter FB1_ADDR = 32'h8112c000,
     // Burst Length. Supports 1, 2, 4, 8, 16, 32, 64, 128, 256 burst lengths
     parameter integer C_M_AXI_BURST_LEN = 64,
     // Thread ID Width
@@ -26,7 +27,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
     // Initiate AXI transactions
     input logic INIT_AXI_TXN,
     // Asserts when transaction is complete
-    output logic MACHINE_IDLE,
+    output logic MACHINE_BUSY,
     // Asserts when ERROR is detected
     output logic ERROR,
     // Global Clock Signal.
@@ -81,23 +82,35 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
     output logic [7:0] G,
     output logic [7:0] B
 );
-  logic [63:0] doutb;
+  logic [63:0] doutb_fb0, doutb_fb1;
   logic [8:0] bram_read_addr;
   logic [8:0] bram_write_addr;
-  logic bram_wea;
+  logic bram0_wea, bram1_wea;
   logic bram_enb;
   always_comb begin
     if (drawX[9:1] <= 9'h13F) begin
       bram_enb = 1'b1;
       bram_read_addr = drawX[9:1];
-      if (drawX[0] == 0) begin
-        R = doutb[31:24];
-        G = doutb[23:16];
-        B = doutb[15:8];
+      if (doutb_fb1[7:0] == 1) begin  // draw 2D over 3D canvas
+        if (drawX[0] == 0) begin
+          R = doutb_fb1[31:24];
+          G = doutb_fb1[23:16];
+          B = doutb_fb1[15:8];
+        end else begin
+          R = doutb_fb1[63:56];
+          G = doutb_fb1[55:48];
+          B = doutb_fb1[47:40];
+        end
       end else begin
-        R = doutb[63:56];
-        G = doutb[55:48];
-        B = doutb[47:40];
+        if (drawX[0] == 0) begin
+          R = doutb_fb0[31:24];
+          G = doutb_fb0[23:16];
+          B = doutb_fb0[15:8];
+        end else begin
+          R = doutb_fb0[63:56];
+          G = doutb_fb0[55:48];
+          B = doutb_fb0[47:40];
+        end
       end
     end else begin
       bram_enb = 1'b0;
@@ -107,17 +120,32 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       B = 8'h00;
     end
   end
-  blk_mem_gen_0 bram (
+  // BRAM for FB0 (3D Rendering)
+  blk_mem_gen_0 bram0 (
       // Port A in
       .addra(bram_write_addr),
       .clka (M_AXI_ACLK),
       .dina (M_AXI_RDATA),
       .ena  (1'b1),
-      .wea  (bram_wea),
+      .wea  (bram0_wea),
       //Port B out
       .addrb(bram_read_addr),
       .clkb (M_AXI_ACLK),
-      .doutb(doutb),
+      .doutb(doutb_fb0),
+      .enb  (bram_enb)
+  );
+  // BRAM for FB1 (2D Rendering)
+  blk_mem_gen_0 bram1 (
+      // Port A in
+      .addra(bram_write_addr),
+      .clka (M_AXI_ACLK),
+      .dina (M_AXI_RDATA),
+      .ena  (1'b1),
+      .wea  (bram1_wea),
+      //Port B out
+      .addrb(bram_read_addr),
+      .clkb (M_AXI_ACLK),
+      .doutb(doutb_fb1),
       .enb  (bram_enb)
   );
   // function called clogb2 that returns an integer which has the
@@ -135,36 +163,30 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   // number of write or read transaction.
   localparam integer C_TRANSACTIONS_NUM = clogb2(C_M_AXI_BURST_LEN - 1);  //6
 
-  // Burst length for transactions, in C_M_AXI_DATA_WIDTHs.
-  // Non-2^n lengths will eventually cause bursts across 4K address boundaries.
-  localparam integer C_MASTER_LENGTH = 12;  // all addr space be read
-  // total number of burst transfers is master length divided by burst length and burst size
-  localparam integer C_NO_BURSTS_REQ = C_MASTER_LENGTH - clogb2(
-      (C_M_AXI_BURST_LEN * C_M_AXI_DATA_WIDTH / 8) - 1
-  );  //12-clogb2(64*64/8-1)=12-9=3
+
   localparam integer READ_BEATS_COUNT = 5;  // 5*128=640 pixels
 
-  enum logic {
-    IDLE = 1'b0,
-    INIT_READ = 1'b1
-  } mst_exec_state;
-
+  typedef enum logic [3:0] {
+    IDLE = 4'h0,
+    FB0_READ = 4'h1,
+    FB1_READ = 4'h2
+  } state_t;
+  state_t mst_exec_state;
 
   // AXI4LITE signals
   //AXI4 internal temp signals
   logic [C_M_AXI_ADDR_WIDTH-1 : 0] axi_araddr;
+  logic [C_M_AXI_ADDR_WIDTH-1 : 0] axi_addr_base;
   logic axi_arvalid;
   logic axi_rready;
   //write beat count in a burst
   //read beat count in a burst
   logic [C_TRANSACTIONS_NUM : 0] read_index;
-  //The burst counters are used to track the number of burst transfers of C_M_AXI_BURST_LEN burst length needed to transfer 2^C_MASTER_LENGTH bytes of data.
 
   logic [2:0] read_burst_counter;
   // hex(640*4*480)= 0x12c000, 21 bits
   logic [20:0] line_stride_addr_counter;
   logic start_single_burst_read;
-  logic machine_idle;
   logic burst_read_active;
   //Interface response error flags
   logic read_resp_error;
@@ -172,6 +194,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   logic init_txn_ff;
   logic init_txn_ff2;
   logic init_txn_pulse;
+  logic init_burst_pulse;
 
   logic v_blank_ff;
   logic v_blank_ff2;
@@ -181,7 +204,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
 
   //Read Address (AR)
   assign M_AXI_ARID = 'b0;
-  assign M_AXI_ARADDR = axi_araddr + C_M_TARGET_SLAVE_BASE_ADDR;
+  assign M_AXI_ARADDR = axi_araddr + axi_addr_base;
   //Burst LENgth is number of transaction beats, minus 1
   assign M_AXI_ARLEN = C_M_AXI_BURST_LEN - 1;
   //Size should be C_M_AXI_DATA_WIDTH, in 2^n bytes, otherwise narrow bursts are used
@@ -197,7 +220,6 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   //Read and Read Response (R)
   assign M_AXI_RREADY = axi_rready;
   //Example design I/O
-  assign MACHINE_IDLE = machine_idle;
   assign init_txn_pulse = (!init_txn_ff2) && init_txn_ff;
   assign v_blank_pulse = (!v_blank_ff2) && v_blank_ff;
 
@@ -227,7 +249,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
     if (M_AXI_ARESETN == 0 || v_blank_pulse) begin
       line_stride_addr_counter <= 21'h0;
     end else begin
-      if (M_AXI_RLAST && axi_rready && (read_burst_counter == (READ_BEATS_COUNT - 1)))
+      if (M_AXI_RLAST && axi_rready && (read_burst_counter == (READ_BEATS_COUNT - 1)) && (mst_exec_state == FB1_READ))
         line_stride_addr_counter <= line_stride_addr_counter + 12'hA00;  //640*4=2560,0xA00
     end
   end
@@ -236,7 +258,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   //----------------------------
   always_ff @(posedge M_AXI_ACLK) begin
 
-    if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1) begin
+    if (M_AXI_ARESETN == 0 || init_burst_pulse == 1'b1) begin
       axi_arvalid <= 1'b0;
     end  // If previously not valid , start next transaction              
     else if (~axi_arvalid && start_single_burst_read) begin
@@ -249,7 +271,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
 
   // Next address after ARREADY indicates previous address acceptance  
   always_ff @(posedge M_AXI_ACLK) begin
-    if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1) begin
+    if (M_AXI_ARESETN == 0 || init_burst_pulse == 1'b1) begin
       axi_araddr <= line_stride_addr_counter;
     end else if (M_AXI_ARREADY && axi_arvalid) begin
       //Burst size in bytes One beat, 64*8=512 Byte, 128 pixels, 5 beat=640 pixels
@@ -261,11 +283,10 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   //Read Data (and Response) Channel
   //--------------------------------
   assign rnext = M_AXI_RVALID && axi_rready;
-  assign bram_wea = rnext;
   // Burst length counter. Uses extra counter register bit to indicate    
   // terminal count to reduce decode logic                                
   always_ff @(posedge M_AXI_ACLK) begin
-    if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1 || start_single_burst_read) begin
+    if (M_AXI_ARESETN == 0 || init_burst_pulse == 1'b1 || start_single_burst_read) begin
       read_index <= 0;
     end                                                               
 	    else if (rnext && (read_index != C_M_AXI_BURST_LEN-1))// max index of beat in a single burst is C_M_AXI_BURST_LEN-1, 63
@@ -284,7 +305,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
 	 more data, so no need to throttle the RREADY signal                    
 	 */
   always_ff @(posedge M_AXI_ACLK) begin
-    if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1) begin
+    if (M_AXI_ARESETN == 0 || init_burst_pulse == 1'b1) begin
       axi_rready <= 1'b0;
     end  // accept/acknowledge rdata/rresp with axi_rready by the master     
          // when M_AXI_RVALID is asserted by slave                           
@@ -307,7 +328,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   //Register and hold any data mismatches, or read/write interface errors 
 
   always_ff @(posedge M_AXI_ACLK) begin
-    if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1) begin
+    if (M_AXI_ARESETN == 0 || init_burst_pulse == 1'b1) begin
       ERROR <= 1'b0;
     end else begin
       if (read_resp_error) ERROR <= 1'b1;
@@ -315,20 +336,35 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
     end
   end
 
-
+  // data flow control
+  always_comb begin
+    if (mst_exec_state == FB0_READ) begin
+      bram0_wea = rnext;
+      bram1_wea = 1'b0;
+    end else if (mst_exec_state == FB1_READ) begin
+      bram0_wea = 1'b0;
+      bram1_wea = rnext;
+    end else begin
+      bram0_wea = 1'b0;
+      bram1_wea = 1'b0;
+    end
+  end
   // read_burst_counter counter keeps track with the number of burst transaction initiated                   
   // against the number of burst transactions the master needs to initiate                                   
   always_ff @(posedge M_AXI_ACLK) begin
-    if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1) begin
+    if (M_AXI_ARESETN == 0) begin
       read_burst_counter <= 'b0;
       // end else if (M_AXI_ARREADY && axi_arvalid) begin, to prevent generating erroneous bram addr(eg from 0x0 to 0x40)
     end else if (M_AXI_RLAST && axi_rready) begin
       if (read_burst_counter != READ_BEATS_COUNT) begin
         read_burst_counter <= read_burst_counter + 1'b1;
       end
-    end else read_burst_counter <= read_burst_counter;
+    end else if (read_burst_counter == READ_BEATS_COUNT) begin
+      read_burst_counter <= 0;
+    end else begin
+      read_burst_counter <= read_burst_counter;
+    end
   end
-
 
   //implement master command interface state machine                                                        
 
@@ -338,7 +374,9 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       // All the signals are assigned default values under reset condition                                
       mst_exec_state          <= IDLE;
       start_single_burst_read <= 1'b0;
-      machine_idle            <= 1'b1;
+      MACHINE_BUSY            <= 1'b0;
+      axi_addr_base           <= FB0_ADDR;
+      init_burst_pulse        <= 1'b0;
     end else begin
       // state transition                                                                                 
       case (mst_exec_state)
@@ -346,15 +384,15 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
         // This state is responsible to wait for user defined C_M_START_COUNT                           
         // number of clock cycles.                                                                      
         if (init_txn_pulse == 1'b1) begin
-          mst_exec_state <= INIT_READ;
-          machine_idle   <= 1'b0;
+          mst_exec_state <= FB0_READ;
+          axi_addr_base <= FB0_ADDR;
+          init_burst_pulse <= 1'b1;
+          MACHINE_BUSY <= 1'b1;
         end else begin
-          // remember to reset start_single_burst_read since never go to INIT_READ state
-          // to clear it
-          start_single_burst_read <= 1'b0;
+          MACHINE_BUSY   <= 1'b0;
           mst_exec_state <= IDLE;
         end
-        INIT_READ:
+        FB0_READ:  // state 'h01
         // This state is responsible to issue start_single_read pulse to                                
         // initiate a read transaction. Read transactions will be                                       
         // issued until burst_read_active signal is asserted.                                           
@@ -363,11 +401,27 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
         // 1 cycle and initiates a new read transaction. 
         // And also only need to check counter, since ready and valid are deasserted in next cycle
         // so need to wait another 1 cycle
-        if (/*M_AXI_RVALID && axi_rready && (read_index == C_M_AXI_BURST_LEN-1) && */(read_burst_counter == READ_BEATS_COUNT)) begin
-          mst_exec_state <= IDLE;
+        if (read_burst_counter == READ_BEATS_COUNT) begin
+          // do FB1 read
+          mst_exec_state <= FB1_READ;
+          axi_addr_base <= FB1_ADDR;
+          init_burst_pulse <= 1'b1;  // at start of each bunch of burst
         end else begin
-          mst_exec_state <= INIT_READ;
-
+          init_burst_pulse <= 1'b0;  // disable pulse
+          mst_exec_state   <= FB0_READ;
+          if (~axi_arvalid && ~burst_read_active && ~start_single_burst_read) begin
+            start_single_burst_read <= 1'b1;
+          end else begin
+            start_single_burst_read <= 1'b0; //Negate to generate a pulse                            
+          end
+        end
+        FB1_READ:  // state 'h02
+        if (read_burst_counter == READ_BEATS_COUNT) begin
+          mst_exec_state <= IDLE;
+          axi_addr_base  <= FB0_ADDR;  // not necessary to do this
+        end else begin
+          init_burst_pulse <= 1'b0;  // disable pulse
+          mst_exec_state   <= FB1_READ;
           if (~axi_arvalid && ~burst_read_active && ~start_single_burst_read) begin
             start_single_burst_read <= 1'b1;
           end else begin
@@ -382,11 +436,8 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
 
 
 
-  // burst_read_active signal is asserted when there is a burst write transaction                           
-  // is initiated by the assertion of start_single_burst_write. start_single_burst_read                     
-  // signal remains asserted until the burst read is accepted by the master                                 
   always_ff @(posedge M_AXI_ACLK) begin
-    if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1) burst_read_active <= 1'b0;
+    if (M_AXI_ARESETN == 0 || init_burst_pulse == 1'b1) burst_read_active <= 1'b0;
 
     //The burst_write_active is asserted when a write burst transaction is initiated                        
     else if (start_single_burst_read) burst_read_active <= 1'b1;

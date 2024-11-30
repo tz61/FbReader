@@ -9,7 +9,8 @@ module axi4_fbreader_to_hdmi_v1_0 #(
 
 
     // Parameters of Axi Master Bus Interface M00_AXI
-    parameter C_M00_AXI_TARGET_SLAVE_BASE_ADDR = 32'h81000000,
+    parameter FB0_ADDR = 32'h81000000,
+		parameter FB1_ADDR = 32'h8112c000,
     parameter integer C_M00_AXI_BURST_LEN = 64,
     parameter integer C_M00_AXI_ID_WIDTH = 1,
     parameter integer C_M00_AXI_ADDR_WIDTH = 32,
@@ -27,7 +28,7 @@ module axi4_fbreader_to_hdmi_v1_0 #(
     input wire clk_25m,  //25m exactly for xc7s50-2csga324
 
     // Ports of Axi Master Bus Interface M00_AXI
-    output wire m00_axi_machine_idle,
+    output wire m00_axi_machine_busy,
     output wire m00_axi_error,
     input wire m00_axi_aclk,
     input wire m00_axi_aresetn,
@@ -54,14 +55,15 @@ module axi4_fbreader_to_hdmi_v1_0 #(
   wire [9:0] drawX, drawY;
   wire init_read_line, v_blank;
   axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
-      .C_M_TARGET_SLAVE_BASE_ADDR(C_M00_AXI_TARGET_SLAVE_BASE_ADDR),
+      .FB0_ADDR(FB0_ADDR),
+			.FB1_ADDR(FB1_ADDR),
       .C_M_AXI_BURST_LEN(C_M00_AXI_BURST_LEN),
       .C_M_AXI_ID_WIDTH(C_M00_AXI_ID_WIDTH),
       .C_M_AXI_ADDR_WIDTH(C_M00_AXI_ADDR_WIDTH),
       .C_M_AXI_DATA_WIDTH(C_M00_AXI_DATA_WIDTH)
   ) axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst (
       .INIT_AXI_TXN(init_read_line),
-      .MACHINE_IDLE(m00_axi_machine_idle),
+      .MACHINE_BUSY(m00_axi_machine_busy),
       .ERROR(m00_axi_error),
       .M_AXI_ACLK(m00_axi_aclk),
       .M_AXI_ARESETN(m00_axi_aresetn),
