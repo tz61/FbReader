@@ -27,7 +27,6 @@ module axi4_fbreader_tb ();
   logic [3 : 0] m00_axi_arqos;
   logic m00_axi_arvalid;
   logic m00_axi_arready;
-  logic [C_M00_AXI_ID_WIDTH-1 : 0] m00_axi_rid;
   logic [C_M00_AXI_DATA_WIDTH-1 : 0] m00_axi_rdata;
   logic [1 : 0] m00_axi_rresp;
   logic m00_axi_rlast;
@@ -51,28 +50,39 @@ module axi4_fbreader_tb ();
   logic [9:0] hc, vc;
   assign hc = inst.vgac.hc;
   assign vc = inst.vgac.vc;
+  logic [7:0] red, green, blue;
+  assign red   = inst.red;
+  assign green = inst.green;
+  assign blue  = inst.blue;
   // testbench buffer
   logic is_fb0;
+  logic [6:0] slave_burst_counter;
   logic [C_M00_AXI_ADDR_WIDTH-1 : 0] slave_addr;
   logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_fb0[(640/2)*480];// 64bit for 2 pixel, 640x480
   logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_fb1[(640/2)*480];// 64bit for 2 pixel, 640x480
-  logic is_read_fb0;
   task clear_slave_data();
+    // init axi data line
+    m00_axi_rlast = 1'b0;
+    m00_axi_rdata = 'h1145141919810893;
+    // init slave side data
+    slave_burst_counter = 0;
     is_fb0 = 1;
     begin
       integer i;
       for (i = 0; i < (640 / 2) * 480; i = i + 1) begin
-        slave_data_fb0[i] = i % 64;
-        slave_data_fb1[i] = i % 64;
+        // blue channel: current col(capped to 8 bits)
+        // row number lies between red and green channel
+        slave_data_fb0[i] = ((((i % 320)*2) | ((i / 320) << 12))<<8)+((((i % 320)*2+1) | ((i / 320) << 12))<<(32+8));
+        slave_data_fb1[i] = ((((i % 320)*2) | ((i / 320) << 12))<<8)+((((i % 320)*2+1) | ((i / 320) << 12))<<(32+8));
       end
     end
   endtask
-  task axi_slave_provide_read_line();
+  task axi_slave_provide_read_burst();
     begin
-      wait (init_read_line);  // pulse
       wait (m00_axi_arvalid);
       @(posedge m00_axi_aclk);
       m00_axi_arready <= 1'b1;
+      slave_burst_counter <= 0;
       slave_addr <= (m00_axi_araddr - C_M00_AXI_TARGET_SLAVE_BASE_ADDR)/8; // byte addr to 8byte addr
       @(posedge m00_axi_aclk);
       m00_axi_arready <= 1'b0;
@@ -80,14 +90,15 @@ module axi4_fbreader_tb ();
       while (1) begin
         @(posedge m00_axi_aclk);
         m00_axi_rvalid <= 1'b1;
-        m00_axi_rdata  <= slave_data_fb0[slave_addr];
-        $info("slave_addr = %h,slave_data[slave_addr]=%h",
-              slave_addr * 8 + C_M00_AXI_TARGET_SLAVE_BASE_ADDR, slave_data_fb0[slave_addr]);
-        if (slave_addr == (640 / 2) * 480 - 1) begin
+        m00_axi_rdata  <= slave_data_fb0[slave_addr+slave_burst_counter];
+        // $info("slave_addr = %h,slave_data=%h",
+        //       (slave_addr + slave_burst_counter) * 8 + C_M00_AXI_TARGET_SLAVE_BASE_ADDR,
+        //       slave_data_fb0[slave_addr+slave_burst_counter]);
+        if (slave_burst_counter == C_M00_AXI_BURST_LEN - 1) begin  // read single burst
           m00_axi_rlast <= 1'b1;
           break;
         end
-        slave_addr <= slave_addr + 1; // 8byte addr+1
+        slave_burst_counter <= slave_burst_counter + 1;  // 8byte addr+1
       end
       wait (m00_axi_rready);
       @(posedge m00_axi_aclk);
@@ -97,16 +108,23 @@ module axi4_fbreader_tb ();
       //end of write transaction
     end
   endtask
+  task slave_read_single_line();
+    begin
+      wait (init_read_line);
+      axi_slave_provide_read_burst();
+      axi_slave_provide_read_burst();
+      axi_slave_provide_read_burst();
+      axi_slave_provide_read_burst();
+      axi_slave_provide_read_burst();
+    end
+  endtask
   // set_property library xil_defaultlib [get_files]
   initial begin : TEST_VECTORS
 
     m00_axi_aresetn = 0;  // active low
     #8 m00_axi_aresetn = 1;
-    #8 hc = 10'b1001111000;  // less than 10'b1001111111
-
-    // initiate a read from master to slave(testbench act as slave)
-    clear_slave_data();
-    axi_slave_provide_read();
-    $finish();
+    #8 clear_slave_data();
+    slave_read_single_line();
+    #2000 $finish();
   end
 endmodule
