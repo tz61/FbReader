@@ -22,6 +22,7 @@ module axi4_fbreader_to_hdmi_v1_0 #(
     parameter integer C_M00_AXI_DATA_WIDTH = 64
 ) (
     // Video Port
+    input wire fb_use_alt,
     output wire hdmi_clk_n,
     output wire hdmi_clk_p,
     output wire [2:0] hdmi_tx_n,
@@ -31,7 +32,7 @@ module axi4_fbreader_to_hdmi_v1_0 #(
     // Audio Port
     output wire left_out,
     output wire right_out,
-    input wire [3:0] audio_type_in,
+    input wire [4:0] audio_type_in,
     input wire write_audio_type_en,
     // Ports of Axi Master Bus Interface M00_AXI
     output wire m00_axi_machine_busy,
@@ -60,6 +61,7 @@ module axi4_fbreader_to_hdmi_v1_0 #(
   wire hs, vs, active_nblank, sync;
   wire [9:0] drawX, drawY;
   wire init_read_line, v_blank;
+  wire clk_125m, clk_200mhz, locked;
   axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       .FB0_ADDR(FB0_ADDR),
       .FB1_ADDR(FB1_ADDR),
@@ -76,9 +78,11 @@ module axi4_fbreader_to_hdmi_v1_0 #(
       // audio
       .left_out(left_out),
       .right_out(right_out),
+			.clk_200mhz(clk_200mhz),
       .audio_type_in(audio_type_in),
       .write_audio_type_en(write_audio_type_en),
       // video (audio read is dominated by video read so call it INIT_AXI_TXN)
+      .fb_use_alt(fb_use_alt),
       .INIT_AXI_TXN(init_read_line),
       .MACHINE_BUSY(m00_axi_machine_busy),
       .ERROR(m00_axi_error),
@@ -106,9 +110,9 @@ module axi4_fbreader_to_hdmi_v1_0 #(
       .G(green),
       .B(blue)
   );
-  wire clk_125m, locked;
   clk_wiz_0 main_clkgen (
       .clk_125m(clk_125m),
+      .clk_200mhz(clk_200mhz),
       .reset(~m00_axi_aresetn),  //active high reset
       .locked(locked),
       .clk_in1(clk_25m)  // 100M from clk local

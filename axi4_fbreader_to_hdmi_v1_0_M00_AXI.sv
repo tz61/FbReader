@@ -27,8 +27,10 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
 ) (
     output logic left_out,
     output logic right_out,
-    input logic [3:0] audio_type_in,
+    input logic clk_200mhz,
+    input logic [4:0] audio_type_in,
     input logic write_audio_type_en,  // generate a pulse on this signal's rising edge
+    input logic fb_use_alt,
     // Initiate AXI transactions
     input logic INIT_AXI_TXN,
     // Asserts when transaction is complete
@@ -220,14 +222,14 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   logic ch1_audio_done, ch2_audio_done, ch3_audio_done, ch4_audio_done;
   logic [31 : 0] ch1_dout, ch2_dout, ch3_dout, ch4_dout;
   logic [15:0] left_mixer, right_mixer;
-  logic clk_200mhz;
   logic [11:0] counter_44k1;  // max 4095
   logic write_audio_type_pulse, read_audio_type_pulse;
-  logic [3:0] audio_type_out;
+  logic [4:0] audio_type_out;
   logic write_audio_type_en_ff1;
   logic write_audio_type_en_ff2;
   logic audio_event_fifo_empty;
   logic audio_event_fifo_almost_empty;
+  logic ch1_force_reset_pulse;
   assign write_audio_type_pulse = (~write_audio_type_en_ff2) && write_audio_type_en_ff1;
   always_ff @(posedge M_AXI_ACLK) begin
     if (~M_AXI_ARESETN) begin
@@ -291,8 +293,41 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   end
   // TODO Channel mixing
   // store left channel in high 16 bits, right channel in low 16 bits
-  assign left_mixer  = ch1_dout[31:16];
-  assign right_mixer = ch1_dout[15:0];
+  logic [15:0] ch1_left_sel, ch2_left_sel, ch3_left_sel, ch4_left_sel;
+  logic [15:0] ch1_right_sel, ch2_right_sel, ch3_right_sel, ch4_right_sel;
+  always_comb begin
+    if(ch1_busy) begin
+      ch1_left_sel  = ch1_dout[31:16];
+      ch1_right_sel = ch1_dout[15:0];
+    end else begin
+      ch1_left_sel  = 16'h0;
+      ch1_right_sel = 16'h0;
+    end
+    if(ch2_busy) begin
+      ch2_left_sel  = ch2_dout[31:16];
+      ch2_right_sel = ch2_dout[15:0];
+    end else begin
+      ch2_left_sel  = 16'h0;
+      ch2_right_sel = 16'h0;
+    end
+    if(ch3_busy) begin
+      ch3_left_sel  = ch3_dout[31:16];
+      ch3_right_sel = ch3_dout[15:0];
+    end else begin
+      ch3_left_sel  = 16'h0;
+      ch3_right_sel = 16'h0;
+    end
+    if(ch4_busy) begin
+      ch4_left_sel  = ch4_dout[31:16];
+      ch4_right_sel = ch4_dout[15:0];
+    end else begin
+      ch4_left_sel  = 16'h0;
+      ch4_right_sel = 16'h0;
+    end
+    // mixing by each channel 25% volume
+    left_mixer = (ch1_left_sel >> 2) +  (ch2_left_sel >> 2) + (ch3_left_sel >> 2) + (ch4_left_sel >> 2);
+    right_mixer = (ch1_right_sel >> 2) +  (ch2_right_sel >> 2) + (ch3_right_sel >> 2) + (ch4_right_sel >> 2);
+  end
 
   always_ff @(posedge M_AXI_ACLK) begin
     if (~M_AXI_ARESETN) begin
@@ -382,11 +417,6 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       end
     end
   end
-  clk_gen_audio clk_gen_audio_inst (
-      .reset(~M_AXI_ARESETN),
-      .clk_in1(M_AXI_ACLK),  // assume it is 100mhz
-      .clk_200mhz(clk_200mhz)
-  );
   pwm_gen pwm_left (
       .clk_200mhz(clk_200mhz),
       .rst(~M_AXI_ARESETN),
@@ -445,14 +475,14 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   );
   //
   event_fifo audio_event_fifo (
-      .din  (audio_type_in),
+      .din(audio_type_in),
       .wr_en(write_audio_type_pulse),
-      .dout (audio_type_out),
+      .dout(audio_type_out),
       .rd_en(read_audio_type_pulse),
       .empty(audio_event_fifo_empty),
       .almost_empty(audio_event_fifo_almost_empty),
-      .clk  (M_AXI_ACLK),
-      .srst (~M_AXI_ARESETN)
+      .clk(M_AXI_ACLK),
+      .srst(~M_AXI_ARESETN)
   );
   always_ff @(posedge M_AXI_ACLK) begin
     // if v_blank_pulse or reset, reset the line stride counter
@@ -462,7 +492,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       ch3_addr_stride <= 21'h0;
       ch4_addr_stride <= 21'h0;
     end else begin
-      if (~ch1_busy) begin
+      if (~ch1_busy || ch1_force_reset_pulse) begin
         ch1_addr_stride <= 21'h0;
       end
       if (~ch2_busy) begin
@@ -638,15 +668,24 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       ch2_sound_id                   <= 16;
       ch3_sound_id                   <= 16;
       ch4_sound_id                   <= 16;
+      ch1_force_reset_pulse          <= 1'b0;
     end else begin
+      // some auto deassertion signals
+      if (ch1_force_reset_pulse) begin
+        ch1_force_reset_pulse <= 1'b0;
+      end
       // state transition                                                                                 
       case (mst_exec_state)
         IDLE:
         // This state is responsible to wait for user defined C_M_START_COUNT                           
         // number of clock cycles.                                                                      
         if (init_txn_pulse == 1'b1) begin
-          mst_exec_state   <= FB0_READ;
-          axi_addr_base    <= FB0_ADDR;
+          mst_exec_state <= FB0_READ;
+          if (fb_use_alt) begin
+            axi_addr_base <= FB0_ALT_ADDR;
+          end else begin
+            axi_addr_base <= FB0_ADDR;
+          end
           M_AXI_ARLEN      <= FB_BEATS_LEN - 1;
           cur_beats_len    <= FB_BEATS_LEN;
           cur_burst_count  <= FB_BURST_COUNT;
@@ -679,7 +718,11 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
         if (read_burst_counter == cur_burst_count) begin
           // do FB1 read
           mst_exec_state <= FB1_READ;
-          axi_addr_base <= FB1_ADDR;
+          if (fb_use_alt) begin
+            axi_addr_base <= FB1_ALT_ADDR;
+          end else begin
+            axi_addr_base <= FB1_ADDR;
+          end
           init_burst_pulse <= 1'b1;  // at start of each bunch of burst for FB1 Read
         end else begin
           init_burst_pulse <= 1'b0;  // disable pulse
@@ -721,18 +764,21 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
             if (clear_audio_event_fifo_counter == (4 - 1) || audio_event_fifo_almost_empty) begin
               read_audio_type_pulse <= 1'b0;
             end
-            if (~ch1_busy) begin
-              ch1_sound_id <= audio_type_out;
+            if (audio_type_out[4]) begin  // BGM only on ch1
+              ch1_sound_id <= audio_type_out[3:0];
               ch1_busy <= 1'b1;
-            end else if (~ch2_busy) begin
-              ch2_sound_id <= audio_type_out;
-              ch2_busy <= 1'b1;
-            end else if (~ch3_busy) begin
-              ch3_sound_id <= audio_type_out;
-              ch3_busy <= 1'b1;
-            end else if (~ch4_busy) begin
-              ch4_sound_id <= audio_type_out;
-              ch4_busy <= 1'b1;
+              ch1_force_reset_pulse <= 1'b1;
+            end else begin  // not BGM
+              if (~ch2_busy) begin
+                ch2_sound_id <= audio_type_out[3:0];
+                ch2_busy <= 1'b1;
+              end else if (~ch3_busy) begin
+                ch3_sound_id <= audio_type_out[3:0];
+                ch3_busy <= 1'b1;
+              end else if (~ch4_busy) begin
+                ch4_sound_id <= audio_type_out[3:0];
+                ch4_busy <= 1'b1;
+              end
             end
           end
         end

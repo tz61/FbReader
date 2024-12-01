@@ -16,10 +16,11 @@ module axi4_fbreader_tb ();
   logic hdmi_clk_p;
   logic [2:0] hdmi_tx_n;
   logic [2:0] hdmi_tx_p;
+  logic fb_use_alt;
   logic clk_25m;  //25m exactly for xc7s50-2csga324
   logic left_out;
   logic right_out;
-  logic [3:0] audio_type_in;
+  logic [4:0] audio_type_in;
   logic write_audio_type_en;
 
   // Ports of Axi Master Bus Interface M00_AXI
@@ -96,7 +97,7 @@ module axi4_fbreader_tb ();
   logic [15:0] left_mixer, right_mixer;
   logic [11:0] counter_44k1;  // max 4095
   logic write_audio_type_pulse, read_audio_type_pulse;
-  logic [3:0] audio_type_out;
+  logic [4:0] audio_type_out;
   logic write_audio_type_en_ff1;
   logic write_audio_type_en_ff2;
   logic audio_event_fifo_empty, audio_event_fifo_almost_empty;
@@ -189,6 +190,9 @@ module axi4_fbreader_tb ();
         // row number lies between red and green channel
         slave_data_fb0[i] = ((((i % 320)*2) | ((i / 320) << 12))<<8)+((((i % 320)*2+1) | ((i / 320) << 12))<<(32+8));
         slave_data_fb1[i] = ((((i % 320)*2) | ((i / 320) << 12))<<8)+((((i % 320)*2+1) | ((i / 320) << 12))<<(32+8));
+        // switch row and col in fb alt test data
+        slave_data_fb0_alt[i] = (((((i % 320)*2)<< 12) | (i / 320))<<8)+(((((i % 320)*2+1) << 12) | (i / 320))<<(32+8));
+        slave_data_fb1_alt[i] = (((((i % 320)*2)<< 12) | (i / 320))<<8)+(((((i % 320)*2+1) << 12) | (i / 320))<<(32+8));
       end
       for (i = 0; i < 12; i = i + 1) begin
         slave_data_audio0[i] = 64'h0101010101010101;
@@ -309,32 +313,33 @@ module axi4_fbreader_tb ();
   // set_property library xil_defaultlib [get_files]
   initial begin : TEST_VECTORS
     m00_axi_aresetn = 0;  // active low
+    fb_use_alt = 1;  // using alt buffer
     write_audio_type_en = 0;
     #8 m00_axi_aresetn = 1;
     #8 clear_slave_data();
     // add four audios
-    audio_type_in = 4'b0000;  // audio 0
+    audio_type_in = 5'b00000;  // audio 0
     write_audio_type_en = 1;
     #8 write_audio_type_en = 0;
-    audio_type_in = 4'b0001;  // audio 1
+    audio_type_in = 5'b00001;  // audio 1
     #8 write_audio_type_en = 1;
     #8 write_audio_type_en = 0;
-    audio_type_in = 4'b0010;  // audio 2
+    audio_type_in = 5'b10010;  // audio 2 (BGM)
     #8 write_audio_type_en = 1;
     #8 write_audio_type_en = 0;
-    // audio_type_in = 4'b0011;  // audio 3
+    // audio_type_in = 5'b00011;  // audio 3
     // #8 write_audio_type_en = 1;
     // #8 write_audio_type_en = 0;
-    // audio_type_in = 4'b0011;  // audio 3
+    // audio_type_in = 5'b00011;  // audio 3
     // #8 write_audio_type_en = 1;
     // #8 write_audio_type_en = 0;
-    // audio_type_in = 4'b0010;  // audio 2
+    // audio_type_in = 5'b00010;  // audio 2
     // #8 write_audio_type_en = 1;
     // #8 write_audio_type_en = 0;
-    // audio_type_in = 4'b0001;  // audio 1
+    // audio_type_in = 5'b00001;  // audio 1
     // #8 write_audio_type_en = 1;
     // #8 write_audio_type_en = 0;
-    // audio_type_in = 4'b0000;  // audio 0
+    // audio_type_in = 5'b00000;  // audio 0
     // #8 write_audio_type_en = 1;
     // #8 write_audio_type_en = 0;
     slave_read_single_line();
