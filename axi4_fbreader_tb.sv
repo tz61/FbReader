@@ -79,7 +79,7 @@ module axi4_fbreader_tb ();
   logic [2:0] read_burst_counter;
   assign read_burst_counter = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.read_burst_counter;
   // audio
-  logic [20:0] ch1_addr_stride;
+  logic [20:0] ch1_addr_stride, ch2_addr_stride, ch3_addr_stride, ch4_addr_stride;
   logic [2:0] cur_fill_ch;
   logic [4:0] ch1_sound_id, ch2_sound_id, ch3_sound_id, ch4_sound_id;
   logic ch1_half_empty, ch2_half_empty, ch3_half_empty, ch4_half_empty;
@@ -99,8 +99,11 @@ module axi4_fbreader_tb ();
   logic [3:0] audio_type_out;
   logic write_audio_type_en_ff1;
   logic write_audio_type_en_ff2;
-  logic audio_event_fifo_empty;
+  logic audio_event_fifo_empty, audio_event_fifo_almost_empty;
   assign ch1_addr_stride = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.ch1_addr_stride;
+  assign ch2_addr_stride = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.ch2_addr_stride;
+  assign ch3_addr_stride = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.ch3_addr_stride;
+  assign ch4_addr_stride = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.ch4_addr_stride;
   assign cur_fill_ch = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.cur_fill_ch;
   assign ch1_sound_id = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.ch1_sound_id;
   assign ch2_sound_id = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.ch2_sound_id;
@@ -150,6 +153,7 @@ module axi4_fbreader_tb ();
   assign write_audio_type_en_ff1 = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.write_audio_type_en_ff1;
   assign write_audio_type_en_ff2 = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.write_audio_type_en_ff2;
   assign audio_event_fifo_empty = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.audio_event_fifo_empty;
+  assign audio_event_fifo_almost_empty = inst.axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst.audio_event_fifo_almost_empty;
   // END of binding  
 
 
@@ -304,18 +308,38 @@ module axi4_fbreader_tb ();
   // endtask
   // set_property library xil_defaultlib [get_files]
   initial begin : TEST_VECTORS
-    audio_type_in   = 4'b0000;  // audio 0
     m00_axi_aresetn = 0;  // active low
     write_audio_type_en = 0;
     #8 m00_axi_aresetn = 1;
     #8 clear_slave_data();
-    // add audio 0 
+    // add four audios
+    audio_type_in = 4'b0000;  // audio 0
     write_audio_type_en = 1;
     #8 write_audio_type_en = 0;
+    audio_type_in = 4'b0001;  // audio 1
+    #8 write_audio_type_en = 1;
+    #8 write_audio_type_en = 0;
+    audio_type_in = 4'b0010;  // audio 2
+    #8 write_audio_type_en = 1;
+    #8 write_audio_type_en = 0;
+    // audio_type_in = 4'b0011;  // audio 3
+    // #8 write_audio_type_en = 1;
+    // #8 write_audio_type_en = 0;
+    // audio_type_in = 4'b0011;  // audio 3
+    // #8 write_audio_type_en = 1;
+    // #8 write_audio_type_en = 0;
+    // audio_type_in = 4'b0010;  // audio 2
+    // #8 write_audio_type_en = 1;
+    // #8 write_audio_type_en = 0;
+    // audio_type_in = 4'b0001;  // audio 1
+    // #8 write_audio_type_en = 1;
+    // #8 write_audio_type_en = 0;
+    // audio_type_in = 4'b0000;  // audio 0
+    // #8 write_audio_type_en = 1;
+    // #8 write_audio_type_en = 0;
     slave_read_single_line();
-    axi_slave_provide_read_burst();
-    axi_slave_provide_read_burst();
-    repeat (50) slave_read_single_line();
+    repeat (40000) axi_slave_provide_read_burst();
+    // when reach 2.5ms, next half load
     #2000 $finish();
   end
 endmodule

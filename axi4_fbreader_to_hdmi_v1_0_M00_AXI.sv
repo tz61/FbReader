@@ -227,6 +227,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   logic write_audio_type_en_ff1;
   logic write_audio_type_en_ff2;
   logic audio_event_fifo_empty;
+  logic audio_event_fifo_almost_empty;
   assign write_audio_type_pulse = (~write_audio_type_en_ff2) && write_audio_type_en_ff1;
   always_ff @(posedge M_AXI_ACLK) begin
     if (~M_AXI_ARESETN) begin
@@ -330,7 +331,8 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
         if (ch1_dout == MAGIC_END_NUM) begin
           ch1_end_counter <= ch1_end_counter + 1;
           if (ch1_end_counter == MAGIC_END_DURATION - 1) begin
-            ch1_audio_done <= 1'b1;
+            ch1_audio_done  <= 1'b1;
+            ch1_end_counter <= 0;
           end
         end else begin
           ch1_end_counter <= 0;  // break if MAGIC_END_NUM is not continuous
@@ -448,6 +450,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       .dout (audio_type_out),
       .rd_en(read_audio_type_pulse),
       .empty(audio_event_fifo_empty),
+      .almost_empty(audio_event_fifo_almost_empty),
       .clk  (M_AXI_ACLK),
       .srst (~M_AXI_ARESETN)
   );
@@ -471,7 +474,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       if (~ch4_busy) begin
         ch4_addr_stride <= 21'h0;
       end
-      if (M_AXI_RLAST && axi_rready && (read_burst_counter == (FB_BURST_COUNT - 1)) && (mst_exec_state == FILL_AUDIO_PROCESS)) begin
+      if (M_AXI_RLAST && axi_rready && (read_burst_counter == (AUDIO_BURST_COUNT - 1)) && (mst_exec_state == FILL_AUDIO_PROCESS)) begin
         if (cur_fill_ch == 1) begin
           ch1_addr_stride <= ch1_addr_stride + AUDIO_BEATS_LEN*AUDIO_BURST_COUNT*C_M_AXI_DATA_WIDTH/8; // 256*1*8=2048Bytes
         end else if (cur_fill_ch == 2) begin
@@ -652,6 +655,17 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
         end else begin
           MACHINE_BUSY   <= 1'b0;
           mst_exec_state <= IDLE;
+          // a single channel's filling is done
+          // check whether a channel is still busy
+          if (ch1_addr_stride == AUDIO_FILE_SIZE || ch1_audio_done) begin
+            ch1_busy <= 0;
+          end else if (ch2_addr_stride == AUDIO_FILE_SIZE || ch2_audio_done) begin
+            ch2_busy <= 0;
+          end else if (ch3_addr_stride == AUDIO_FILE_SIZE || ch3_audio_done) begin
+            ch3_busy <= 0;
+          end else if (ch4_addr_stride == AUDIO_FILE_SIZE || ch4_audio_done) begin
+            ch4_busy <= 0;
+          end
         end
         FB0_READ:  // state 'h01
         // This state is responsible to issue start_single_read pulse to                                
@@ -703,6 +717,10 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
             mst_exec_state <= FILL_AUDIO_PREPARE;
             read_audio_type_pulse <= 1'b0;
           end else begin
+            // clear pulse in advance, to prevent missing a fifo output
+            if (clear_audio_event_fifo_counter == (4 - 1) || audio_event_fifo_almost_empty) begin
+              read_audio_type_pulse <= 1'b0;
+            end
             if (~ch1_busy) begin
               ch1_sound_id <= audio_type_out;
               ch1_busy <= 1'b1;
@@ -761,17 +779,6 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
         end
         FILL_AUDIO_PROCESS: begin
           if (read_burst_counter == cur_burst_count) begin
-            // a single channel's filling is done
-            // check whether a channel is still busy
-            if (ch1_addr_stride == AUDIO_FILE_SIZE || ch1_audio_done) begin
-              ch1_busy <= 0;
-            end else if (ch2_addr_stride == AUDIO_FILE_SIZE || ch2_audio_done) begin
-              ch2_busy <= 0;
-            end else if (ch3_addr_stride == AUDIO_FILE_SIZE || ch3_audio_done) begin
-              ch3_busy <= 0;
-            end else if (ch4_addr_stride == AUDIO_FILE_SIZE || ch4_audio_done) begin
-              ch4_busy <= 0;
-            end
             mst_exec_state <= FILL_AUDIO_LAUNCH;  // return to FILL_AUDIO_LAUNCH
           end else begin
             init_burst_pulse <= 1'b0;  // disable pulse
