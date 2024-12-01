@@ -6,7 +6,7 @@ module pwm_gen (
 );
   // 200MHz/44.1kHz = 200e6/(100e6/2/1134) = 4536, that is within 1 sample you can only count from 0 to 4535
   logic [12:0] counter;  //max 8192
-  always_ff @(posedge clk_200mhz) begin
+  always_ff @(posedge clk_200mhz or posedge rst) begin
     if (rst) begin
       counter <= 0;
     end else begin

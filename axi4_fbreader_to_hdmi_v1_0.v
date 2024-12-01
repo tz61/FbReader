@@ -31,6 +31,8 @@ module axi4_fbreader_to_hdmi_v1_0 #(
     // Audio Port
     output wire left_out,
     output wire right_out,
+    input wire [3:0] audio_type_in,
+    input wire write_audio_type_en,
     // Ports of Axi Master Bus Interface M00_AXI
     output wire m00_axi_machine_busy,
     output wire m00_axi_error,
@@ -61,18 +63,22 @@ module axi4_fbreader_to_hdmi_v1_0 #(
   axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       .FB0_ADDR(FB0_ADDR),
       .FB1_ADDR(FB1_ADDR),
-			.FB0_ALT_ADDR(FB0_ALT_ADDR),
-			.FB1_ALT_ADDR(FB1_ALT_ADDR),
-			.AUDIO_BASE_ADDR(AUDIO_BASE_ADDR),
-			.AUDIO_FILE_SIZE(AUDIO_FILE_SIZE),
+      .FB0_ALT_ADDR(FB0_ALT_ADDR),
+      .FB1_ALT_ADDR(FB1_ALT_ADDR),
+      .AUDIO_BASE_ADDR(AUDIO_BASE_ADDR),
+      .AUDIO_FILE_SIZE(AUDIO_FILE_SIZE),
       .FB_BEATS_LEN(FB_BEATS_LEN),
-			.AUDIO_BEATS_LEN(AUDIO_BEATS_LEN),
+      .AUDIO_BEATS_LEN(AUDIO_BEATS_LEN),
       .C_M_AXI_ID_WIDTH(C_M00_AXI_ID_WIDTH),
       .C_M_AXI_ADDR_WIDTH(C_M00_AXI_ADDR_WIDTH),
       .C_M_AXI_DATA_WIDTH(C_M00_AXI_DATA_WIDTH)
   ) axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst (
+      // audio
       .left_out(left_out),
       .right_out(right_out),
+      .audio_type_in(audio_type_in),
+      .write_audio_type_en(write_audio_type_en),
+      // video (audio read is dominated by video read so call it INIT_AXI_TXN)
       .INIT_AXI_TXN(init_read_line),
       .MACHINE_BUSY(m00_axi_machine_busy),
       .ERROR(m00_axi_error),

@@ -209,14 +209,15 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   // or the audio sample is h'11451419 for too long.
   // (magic number in creating audio data marking the end of the audio)
   logic [4:0] ch1_end_counter, ch2_end_counter, ch3_end_counter, ch4_end_counter;
-  localparam MAGIC_END_NUM = 32'h11451419;
+  localparam MAGIC_END_NUM = 32'h00110045;
   localparam MAGIC_END_DURATION = 16;  // enouph to detect the end of the audio
   logic ch1_empty, ch2_empty, ch3_empty, ch4_empty;  // only used to blank the audio
   logic [2:0] fill_audio_wait_counter;
-  logic [2:0] clear_audio_event_fifo_counter; // max 7
+  logic [2:0] clear_audio_event_fifo_counter;  // max 7
   logic [8:0] fill_audio_wait_axi_counter;
   logic ch1_wr_en, ch2_wr_en, ch3_wr_en, ch4_wr_en;
   logic ch1_rd_en, ch2_rd_en, ch3_rd_en, ch4_rd_en;
+  logic ch1_audio_done, ch2_audio_done, ch3_audio_done, ch4_audio_done;
   logic [31 : 0] ch1_dout, ch2_dout, ch3_dout, ch4_dout;
   logic [15:0] left_mixer, right_mixer;
   logic clk_200mhz;
@@ -299,7 +300,27 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       ch2_end_counter <= 0;
       ch3_end_counter <= 0;
       ch4_end_counter <= 0;
+      ch1_audio_done <= 1'b0;
+      ch2_audio_done <= 1'b0;
+      ch3_audio_done <= 1'b0;
+      ch4_audio_done <= 1'b0;
+      ch1_rd_en <= 1'b0;
+      ch2_rd_en <= 1'b0;
+      ch3_rd_en <= 1'b0;
+      ch4_rd_en <= 1'b0;
     end else begin
+      if (~ch1_busy) begin
+        ch1_audio_done <= 1'b0;
+      end
+      if (~ch2_busy) begin
+        ch2_audio_done <= 1'b0;
+      end
+      if (~ch3_busy) begin
+        ch3_audio_done <= 1'b0;
+      end
+      if (~ch4_busy) begin
+        ch4_audio_done <= 1'b0;
+      end
       if (counter_44k1 == (1134 * 2 - 1)) begin  // 100e3/1134/2 = 44.0917kHz
         counter_44k1 <= 0;
         ch1_rd_en <= 1'b1;
@@ -308,21 +329,36 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
         ch4_rd_en <= 1'b1;
         if (ch1_dout == MAGIC_END_NUM) begin
           ch1_end_counter <= ch1_end_counter + 1;
+          if (ch1_end_counter == MAGIC_END_DURATION - 1) begin
+            ch1_audio_done <= 1'b1;
+          end
         end else begin
           ch1_end_counter <= 0;  // break if MAGIC_END_NUM is not continuous
         end
         if (ch2_dout == MAGIC_END_NUM) begin
           ch2_end_counter <= ch2_end_counter + 1;
+          if (ch2_end_counter == MAGIC_END_DURATION - 1) begin
+            ch2_audio_done  <= 1'b1;
+            ch2_end_counter <= 0;
+          end
         end else begin
           ch2_end_counter <= 0;
         end
         if (ch3_dout == MAGIC_END_NUM) begin
           ch3_end_counter <= ch3_end_counter + 1;
+          if (ch3_end_counter == MAGIC_END_DURATION - 1) begin
+            ch3_audio_done  <= 1'b1;
+            ch3_end_counter <= 0;
+          end
         end else begin
           ch3_end_counter <= 0;
         end
         if (ch4_dout == MAGIC_END_NUM) begin
           ch4_end_counter <= ch4_end_counter + 1;
+          if (ch4_end_counter == MAGIC_END_DURATION - 1) begin
+            ch4_audio_done  <= 1'b1;
+            ch4_end_counter <= 0;
+          end
         end else begin
           ch4_end_counter <= 0;
         end
@@ -591,6 +627,14 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       fill_audio_wait_axi_counter    <= 0;
       clear_audio_event_fifo_counter <= 0;
       read_audio_type_pulse          <= 1'b0;
+      ch1_busy                       <= 1'b0;
+      ch2_busy                       <= 1'b0;
+      ch3_busy                       <= 1'b0;
+      ch4_busy                       <= 1'b0;
+      ch1_sound_id                   <= 16;  // for test
+      ch2_sound_id                   <= 16;
+      ch3_sound_id                   <= 16;
+      ch4_sound_id                   <= 16;
     end else begin
       // state transition                                                                                 
       case (mst_exec_state)
@@ -719,13 +763,13 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
           if (read_burst_counter == cur_burst_count) begin
             // a single channel's filling is done
             // check whether a channel is still busy
-            if (ch1_addr_stride == AUDIO_FILE_SIZE || ch1_end_counter == MAGIC_END_DURATION) begin
+            if (ch1_addr_stride == AUDIO_FILE_SIZE || ch1_audio_done) begin
               ch1_busy <= 0;
-            end else if (ch2_addr_stride == AUDIO_FILE_SIZE || ch2_end_counter == MAGIC_END_DURATION) begin
+            end else if (ch2_addr_stride == AUDIO_FILE_SIZE || ch2_audio_done) begin
               ch2_busy <= 0;
-            end else if (ch3_addr_stride == AUDIO_FILE_SIZE || ch3_end_counter == MAGIC_END_DURATION) begin
+            end else if (ch3_addr_stride == AUDIO_FILE_SIZE || ch3_audio_done) begin
               ch3_busy <= 0;
-            end else if (ch4_addr_stride == AUDIO_FILE_SIZE || ch4_end_counter == MAGIC_END_DURATION) begin
+            end else if (ch4_addr_stride == AUDIO_FILE_SIZE || ch4_audio_done) begin
               ch4_busy <= 0;
             end
             mst_exec_state <= FILL_AUDIO_LAUNCH;  // return to FILL_AUDIO_LAUNCH
