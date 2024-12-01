@@ -10,23 +10,27 @@ module axi4_fbreader_to_hdmi_v1_0 #(
 
     // Parameters of Axi Master Bus Interface M00_AXI
     parameter FB0_ADDR = 32'h81000000,
-		parameter FB1_ADDR = 32'h8112c000,
-    parameter integer C_M00_AXI_BURST_LEN = 64,
+    parameter FB1_ADDR = 32'h8112c000,
+    parameter FB0_ALT_ADDR = 32'h81258000,
+    parameter FB1_ALT_ADDR = 32'h81384000,
+    parameter AUDIO_BASE_ADDR = 32'h814B0000,
+    parameter AUDIO_FILE_SIZE = 32'h50bfe0,
+    parameter integer FB_BEATS_LEN = 64,
+    parameter integer AUDIO_BEATS_LEN = 256,
     parameter integer C_M00_AXI_ID_WIDTH = 1,
     parameter integer C_M00_AXI_ADDR_WIDTH = 32,
     parameter integer C_M00_AXI_DATA_WIDTH = 64
 ) (
-    // Users to add ports here
-
-    // User ports ends
-    // Do not modify the ports beyond this line
-
+    // Video Port
     output wire hdmi_clk_n,
     output wire hdmi_clk_p,
     output wire [2:0] hdmi_tx_n,
     output wire [2:0] hdmi_tx_p,
-    input wire clk_25m,  //25m exactly for xc7s50-2csga324
-
+    //25m exactly for xc7s50-2csga324
+    input wire clk_25m,
+    // Audio Port
+    output wire left_out,
+    output wire right_out,
     // Ports of Axi Master Bus Interface M00_AXI
     output wire m00_axi_machine_busy,
     output wire m00_axi_error,
@@ -56,12 +60,19 @@ module axi4_fbreader_to_hdmi_v1_0 #(
   wire init_read_line, v_blank;
   axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       .FB0_ADDR(FB0_ADDR),
-			.FB1_ADDR(FB1_ADDR),
-      .C_M_AXI_BURST_LEN(C_M00_AXI_BURST_LEN),
+      .FB1_ADDR(FB1_ADDR),
+			.FB0_ALT_ADDR(FB0_ALT_ADDR),
+			.FB1_ALT_ADDR(FB1_ALT_ADDR),
+			.AUDIO_BASE_ADDR(AUDIO_BASE_ADDR),
+			.AUDIO_FILE_SIZE(AUDIO_FILE_SIZE),
+      .FB_BEATS_LEN(FB_BEATS_LEN),
+			.AUDIO_BEATS_LEN(AUDIO_BEATS_LEN),
       .C_M_AXI_ID_WIDTH(C_M00_AXI_ID_WIDTH),
       .C_M_AXI_ADDR_WIDTH(C_M00_AXI_ADDR_WIDTH),
       .C_M_AXI_DATA_WIDTH(C_M00_AXI_DATA_WIDTH)
   ) axi4_fbreader_to_hdmi_v1_0_M00_AXI_inst (
+      .left_out(left_out),
+      .right_out(right_out),
       .INIT_AXI_TXN(init_read_line),
       .MACHINE_BUSY(m00_axi_machine_busy),
       .ERROR(m00_axi_error),

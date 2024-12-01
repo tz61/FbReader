@@ -2,6 +2,9 @@
 module axi4_fbreader_tb ();
   localparam FB0_ADDR = 32'h81000000;
   localparam FB1_ADDR = 32'h8112c000;
+  localparam FB0_ALT_ADDR = 32'h81258000;
+  localparam FB1_ALT_ADDR = 32'h81384000;
+  // to 814aFFFF(814B 0000 -1)
   localparam integer C_M00_AXI_BURST_LEN = 64;
   localparam integer C_M00_AXI_ID_WIDTH = 1;
   localparam integer C_M00_AXI_ADDR_WIDTH = 32;
@@ -11,6 +14,8 @@ module axi4_fbreader_tb ();
   logic [2:0] hdmi_tx_n;
   logic [2:0] hdmi_tx_p;
   logic clk_25m;  //25m exactly for xc7s50-2csga324
+  logic left_out;
+  logic right_out;
 
   // Ports of Axi Master Bus Interface M00_AXI
   logic m00_axi_machine_busy;
