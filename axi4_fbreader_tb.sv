@@ -10,8 +10,10 @@ module axi4_fbreader_tb ();
   localparam integer C_M00_AXI_ADDR_WIDTH = 32;
   localparam integer C_M00_AXI_DATA_WIDTH = 64;
 
-  localparam AUDIO_BASE_ADDR = 32'h814B0000;
-  localparam AUDIO_FILE_SIZE = 32'h50bfe0;
+  localparam AUDIO_BGM_ADDR = 32'h814B0000;
+  localparam AUDIO_SFX_ADDR = 32'h8de8fb00;
+  localparam AUDIO_BGM_SIZE = 32'h3277ec0;
+  localparam AUDIO_SFX_SIZE = 32'h1aeaa0;
   logic hdmi_clk_n;
   logic hdmi_clk_p;
   logic [2:0] hdmi_tx_n;
@@ -168,10 +170,10 @@ module axi4_fbreader_tb ();
   logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_fb1[(640/2)*480];
   logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_fb0_alt[(640/2)*480];
   logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_fb1_alt[(640/2)*480];
-  logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_audio0[AUDIO_FILE_SIZE];
-  logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_audio1[AUDIO_FILE_SIZE];
-  logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_audio2[AUDIO_FILE_SIZE];
-  logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_audio3[AUDIO_FILE_SIZE];
+  logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_audio0[AUDIO_BGM_SIZE];
+  logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_audio1[AUDIO_BGM_SIZE];
+  logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_audio2[AUDIO_BGM_SIZE];
+  logic [C_M00_AXI_DATA_WIDTH-1 : 0] slave_data_audio3[AUDIO_BGM_SIZE];
   task clear_slave_data();
     // init axi data line
     m00_axi_rlast = 1'b0;
@@ -200,7 +202,7 @@ module axi4_fbreader_tb ();
         slave_data_audio2[i] = 64'h0303030303030303;
         slave_data_audio3[i] = 64'h0404040404040404;
       end
-      for (i = 12 + 8; i < AUDIO_FILE_SIZE; i = i + 1) begin
+      for (i = 12 + 8; i < AUDIO_BGM_SIZE; i = i + 1) begin
         slave_data_audio0[i] = i;
         slave_data_audio1[i] = i;
         slave_data_audio2[i] = i;
@@ -231,21 +233,21 @@ module axi4_fbreader_tb ();
       end else if (m00_axi_araddr < FB1_ALT_ADDR) begin
         write_type <= 2;
         slave_addr <= (m00_axi_araddr - FB0_ALT_ADDR) / 8;
-      end else if (m00_axi_araddr < AUDIO_BASE_ADDR) begin
+      end else if (m00_axi_araddr < AUDIO_BGM_ADDR) begin
         write_type <= 3;
         slave_addr <= (m00_axi_araddr - FB1_ALT_ADDR) / 8;
-      end else if (m00_axi_araddr < AUDIO_BASE_ADDR + AUDIO_FILE_SIZE) begin
+      end else if (m00_axi_araddr < AUDIO_BGM_ADDR + AUDIO_BGM_SIZE) begin
         write_type <= 4;
-        slave_addr <= (m00_axi_araddr - AUDIO_BASE_ADDR) / 8;
-      end else if (m00_axi_araddr < AUDIO_BASE_ADDR + AUDIO_FILE_SIZE * 2) begin
+        slave_addr <= (m00_axi_araddr - AUDIO_BGM_ADDR) / 8;
+      end else if (m00_axi_araddr < AUDIO_BGM_ADDR + AUDIO_BGM_SIZE * 2) begin
         write_type <= 5;
-        slave_addr <= (m00_axi_araddr - AUDIO_BASE_ADDR - AUDIO_FILE_SIZE) / 8;
-      end else if (m00_axi_araddr < AUDIO_BASE_ADDR + AUDIO_FILE_SIZE * 3) begin
+        slave_addr <= (m00_axi_araddr - AUDIO_BGM_ADDR - AUDIO_BGM_SIZE) / 8;
+      end else if (m00_axi_araddr < AUDIO_BGM_ADDR + AUDIO_BGM_SIZE * 3) begin
         write_type <= 6;
-        slave_addr <= (m00_axi_araddr - AUDIO_BASE_ADDR - AUDIO_FILE_SIZE * 2) / 8;
-      end else if (m00_axi_araddr < AUDIO_BASE_ADDR + AUDIO_FILE_SIZE * 4) begin
+        slave_addr <= (m00_axi_araddr - AUDIO_BGM_ADDR - AUDIO_BGM_SIZE * 2) / 8;
+      end else if (m00_axi_araddr < AUDIO_BGM_ADDR + AUDIO_BGM_SIZE * 4) begin
         write_type <= 7;
-        slave_addr <= (m00_axi_araddr - AUDIO_BASE_ADDR - AUDIO_FILE_SIZE * 3) / 8;
+        slave_addr <= (m00_axi_araddr - AUDIO_BGM_ADDR - AUDIO_BGM_SIZE * 3) / 8;
       end else begin
         $info("Error: address out of range,%h", m00_axi_araddr);
         $finish();
@@ -318,10 +320,11 @@ module axi4_fbreader_tb ();
     #8 m00_axi_aresetn = 1;
     #8 clear_slave_data();
     // add four audios
-    audio_type_in = 5'b00000;  // audio 0
+    // SFX not supported in testbench
+    audio_type_in = 5'b10000;  // audio 0(BGM)
     write_audio_type_en = 1;
     #8 write_audio_type_en = 0;
-    audio_type_in = 5'b00001;  // audio 1
+    audio_type_in = 5'b10001;  // audio 1(BGM)
     #8 write_audio_type_en = 1;
     #8 write_audio_type_en = 0;
     audio_type_in = 5'b10010;  // audio 2 (BGM)

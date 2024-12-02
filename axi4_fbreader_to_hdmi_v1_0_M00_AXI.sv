@@ -12,9 +12,15 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
     parameter FB1_ADDR = 32'h8112c000,
     parameter FB0_ALT_ADDR = 32'h81258000,
     parameter FB1_ALT_ADDR = 32'h81384000,
-    parameter AUDIO_BASE_ADDR = 32'h814B0000,
-    parameter AUDIO_FILE_SIZE = 32'h50bfe0,  // for one 5min song 5.0468 MiB max
-
+    parameter AUDIO_BGM_ADDR = 32'h814B0000,
+    parameter AUDIO_SFX_ADDR = 32'h8de8fb00,
+    parameter AUDIO_BGM_SIZE = 32'h3277ec0,  // for one 5min song 50.46844 MiB max 52920000 Bytes
+    parameter AUDIO_SFX_SIZE = 32'h1aeaa0,  // for one 10s sfx hex(44100*10*2*2) = 1.68 MiB max 1764000 Bytes
+    // hex(int("814B0000",16)+4*int("3277ec0",16)) = 0x8de8fb00
+    // hex(int("8de8fb00",16)+16*int("1aeaa0",16)) = 0x8f97a500 (Next available address)
+    // only 4 bgm supported(201.87376MiBs!) (0,1,2,3)
+    // 16 sfxs supported(26.88MiBs!) (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)
+    // in total 228.75376 MiBs
     // Burst Length. Supports 1, 2, 4, 8, 16, 32, 64, 128, 256 burst lengths
     parameter integer FB_BEATS_LEN = 64,
     parameter integer AUDIO_BEATS_LEN = 256,
@@ -158,6 +164,8 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
 
   localparam integer FB_BURST_COUNT = 5;  // 5*(64*2)=640 pixels
   localparam integer AUDIO_BURST_COUNT = 1;  // 1*(256*1) 
+  // simulate the wait time of audio burst(256cycle) + DDR3 latency(20cycle)
+  localparam FILL_AUDIO_WAIT_CYCLE = 256 + 20;
 
   typedef enum logic [3:0] {
     IDLE = 4'h0,
@@ -186,7 +194,10 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   logic [2:0] cur_burst_count;
   // hex(640*4*480)= 0x12c000, 21 bits
   logic [20:0] line_stride_addr_counter;
-  logic [20:0] ch1_addr_stride, ch2_addr_stride, ch3_addr_stride, ch4_addr_stride;
+  // need more bits to reach 0x3277ec0 hex(2**26-1) = 3ffffff
+  logic [25:0] ch1_addr_stride;
+  // to reach 0x1aeaa0 hex(2**21-1) =  0x1fffff
+  logic [20:0] ch2_addr_stride, ch3_addr_stride, ch4_addr_stride;
   logic start_single_burst_read;
   logic burst_read_active;
   //Interface response error flags
@@ -296,28 +307,28 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   logic [15:0] ch1_left_sel, ch2_left_sel, ch3_left_sel, ch4_left_sel;
   logic [15:0] ch1_right_sel, ch2_right_sel, ch3_right_sel, ch4_right_sel;
   always_comb begin
-    if(ch1_busy) begin
+    if (ch1_busy) begin
       ch1_left_sel  = ch1_dout[31:16];
       ch1_right_sel = ch1_dout[15:0];
     end else begin
       ch1_left_sel  = 16'h0;
       ch1_right_sel = 16'h0;
     end
-    if(ch2_busy) begin
+    if (ch2_busy) begin
       ch2_left_sel  = ch2_dout[31:16];
       ch2_right_sel = ch2_dout[15:0];
     end else begin
       ch2_left_sel  = 16'h0;
       ch2_right_sel = 16'h0;
     end
-    if(ch3_busy) begin
+    if (ch3_busy) begin
       ch3_left_sel  = ch3_dout[31:16];
       ch3_right_sel = ch3_dout[15:0];
     end else begin
       ch3_left_sel  = 16'h0;
       ch3_right_sel = 16'h0;
     end
-    if(ch4_busy) begin
+    if (ch4_busy) begin
       ch4_left_sel  = ch4_dout[31:16];
       ch4_right_sel = ch4_dout[15:0];
     end else begin
@@ -487,13 +498,13 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
   always_ff @(posedge M_AXI_ACLK) begin
     // if v_blank_pulse or reset, reset the line stride counter
     if (M_AXI_ARESETN == 0) begin
-      ch1_addr_stride <= 21'h0;
+      ch1_addr_stride <= 26'h0;
       ch2_addr_stride <= 21'h0;
       ch3_addr_stride <= 21'h0;
       ch4_addr_stride <= 21'h0;
     end else begin
       if (~ch1_busy || ch1_force_reset_pulse) begin
-        ch1_addr_stride <= 21'h0;
+        ch1_addr_stride <= 26'h0;
       end
       if (~ch2_busy) begin
         ch2_addr_stride <= 21'h0;
@@ -664,7 +675,8 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
       ch2_busy                       <= 1'b0;
       ch3_busy                       <= 1'b0;
       ch4_busy                       <= 1'b0;
-      ch1_sound_id                   <= 16;  // for test
+      // INVALID, will only be replaced by incoming audio_type from request
+      ch1_sound_id                   <= 16;
       ch2_sound_id                   <= 16;
       ch3_sound_id                   <= 16;
       ch4_sound_id                   <= 16;
@@ -696,13 +708,13 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
           mst_exec_state <= IDLE;
           // a single channel's filling is done
           // check whether a channel is still busy
-          if (ch1_addr_stride == AUDIO_FILE_SIZE || ch1_audio_done) begin
+          if (ch1_addr_stride == AUDIO_BGM_SIZE || ch1_audio_done) begin
             ch1_busy <= 0;
-          end else if (ch2_addr_stride == AUDIO_FILE_SIZE || ch2_audio_done) begin
+          end else if (ch2_addr_stride == AUDIO_SFX_SIZE || ch2_audio_done) begin
             ch2_busy <= 0;
-          end else if (ch3_addr_stride == AUDIO_FILE_SIZE || ch3_audio_done) begin
+          end else if (ch3_addr_stride == AUDIO_SFX_SIZE || ch3_audio_done) begin
             ch3_busy <= 0;
-          end else if (ch4_addr_stride == AUDIO_FILE_SIZE || ch4_audio_done) begin
+          end else if (ch4_addr_stride == AUDIO_SFX_SIZE || ch4_audio_done) begin
             ch4_busy <= 0;
           end
         end
@@ -789,8 +801,8 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
           cur_burst_count  <= AUDIO_BURST_COUNT;
         end
         // Max 5min, 5*60=300s
-        // 300(second)*44100*2(channel)*2(16bit depth) = 52920000(B)(hex 'h50bfe0)
-        // 5.0468 MiB max
+        // 300(second)*44100*2(channel)*2(16bit depth) = 52920000(B)(hex 'h3277ec0)
+        // 50.46844 MiB max for BGM 1.68MiB for SFX
         FILL_AUDIO_LAUNCH: begin  // state 'h03 , four bullet to load audio data
           // if any of four channel is half empty
           // axi_araddr set by channel stride
@@ -804,16 +816,16 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
             mst_exec_state   <= FILL_AUDIO_PROCESS;
             init_burst_pulse <= 1'b1;  // at start of each bunch of burst for FB1 Read
             if (ch1_half_empty && ch1_busy) begin
-              axi_addr_base <= AUDIO_BASE_ADDR + ch1_sound_id * AUDIO_FILE_SIZE;
+              axi_addr_base <= AUDIO_BGM_ADDR + ch1_sound_id * AUDIO_BGM_SIZE;
               cur_fill_ch   <= 1;
             end else if (ch2_half_empty && ch2_busy) begin
-              axi_addr_base <= AUDIO_BASE_ADDR + ch2_sound_id * AUDIO_FILE_SIZE;
+              axi_addr_base <= AUDIO_SFX_ADDR + ch2_sound_id * AUDIO_SFX_SIZE;
               cur_fill_ch   <= 2;
             end else if (ch3_half_empty && ch3_busy) begin
-              axi_addr_base <= AUDIO_BASE_ADDR + ch3_sound_id * AUDIO_FILE_SIZE;
+              axi_addr_base <= AUDIO_SFX_ADDR + ch3_sound_id * AUDIO_SFX_SIZE;
               cur_fill_ch   <= 3;
             end else if (ch4_half_empty && ch4_busy) begin
-              axi_addr_base <= AUDIO_BASE_ADDR + ch4_sound_id * AUDIO_FILE_SIZE;
+              axi_addr_base <= AUDIO_SFX_ADDR + ch4_sound_id * AUDIO_SFX_SIZE;
               cur_fill_ch   <= 4;
             end else begin
               mst_exec_state <= FILL_AUDIO_WAIT;
@@ -836,8 +848,7 @@ module axi4_fbreader_to_hdmi_v1_0_M00_AXI #(
           end
         end
         FILL_AUDIO_WAIT: begin
-          // TODO wait some axi clks then return to FILL_AUDIO_LAUNCH
-          if (fill_audio_wait_axi_counter == (256 + 20)) begin
+          if (fill_audio_wait_axi_counter == (FILL_AUDIO_WAIT_CYCLE)) begin
             mst_exec_state <= FILL_AUDIO_LAUNCH;
           end else begin
             fill_audio_wait_axi_counter <= fill_audio_wait_axi_counter + 1;
