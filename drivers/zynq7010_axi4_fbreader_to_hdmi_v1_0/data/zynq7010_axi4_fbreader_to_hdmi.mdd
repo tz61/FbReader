@@ -1,0 +1,10 @@
+
+
+OPTION psf_version = 2.1;
+
+BEGIN DRIVER zynq7010_axi4_fbreader_to_hdmi
+	OPTION supported_peripherals = (zynq7010_axi4_fbreader_to_hdmi);
+	OPTION copyfiles = all;
+	OPTION VERSION = 1.0;
+	OPTION NAME = zynq7010_axi4_fbreader_to_hdmi;
+END DRIVER
